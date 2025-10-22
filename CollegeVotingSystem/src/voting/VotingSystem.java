@@ -1,205 +1,321 @@
 package voting;
 
+import javax.swing.*;
+import java.awt.*;
+import java.awt.event.ActionEvent;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.security.MessageDigest;
-import java.sql.*;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.*;
+import java.time.format.DateTimeParseException;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
- * VotingSystem - main app logic using SQLite.
- *
- * Admin password: "admin"
- * Student password (plain) : "LBSCEK" (we never store it; we compare SHA-256)
- * Provided SHA-256 hash for "LBSCEK":
- * 2a908d16f5b9f464010e6a8e38a207f2ca6b3aced46b07c819133a82440b8f0a
+ * VotingGUI - The main graphical interface (Swing) for the college voting system.
+ * Contains all the logic for admin and student operations, adapted from the
+ * previous command-line interface (CLI) to use Swing components.
  */
-public class VotingSystem {
-    private final Scanner sc;
+public class VotingGUI extends JFrame {
+
+    // Security constants
     private static final String ADMIN_PASSWORD = "admin";
-    private static final String STUDENT_PASSWORD_HASH = 
-        "2a908d16f5b9f464010e6a8e38a207f2ca6b3aced46b07c819133a82440b8f0a";
+    private static final String STUDENT_PASSWORD_HASH = "2a908d16f5b9f464010e6a8e38a207f2ca6b3aced46b07c819133a82440b8f0a"; // SHA-256 for "LBSCEK"
+
+    // Time formatting constants
     private static final DateTimeFormatter INPUT_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
     private static final DateTimeFormatter DISPLAY_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
 
-    public VotingSystem(Scanner sc) {
-        this.sc = sc;
+    // UI components
+    private final JPanel mainPanel;
+
+    public VotingGUI() {
+        setTitle("College Voting System");
+        setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        mainPanel = new JPanel();
+        mainPanel.setLayout(new BoxLayout(mainPanel, BoxLayout.Y_AXIS));
+        add(mainPanel);
+        // Show the main menu when the GUI is created
+        showMainMenu();
     }
 
-    // ---------- Main Menu ----------
-    public void mainMenu() {
-        while (true) {
-            System.out.println("\n=== College Voting System ===");
-            System.out.println("1. Admin Login");
-            System.out.println("2. Student Login");
-            System.out.println("3. View Results");
-            System.out.println("4. Exit");
-            System.out.print("Choose: ");
-            String choice = sc.nextLine().trim();
-            switch (choice) {
-                case "1": adminLogin(); break;
-                case "2": studentLogin(); break;
-                case "3": viewResultsMain(); break;
-                case "4": System.out.println("Goodbye!"); return;
-                default: System.out.println("Invalid choice.");
-            }
+    /**
+     * Initializes and displays the main JFrame.
+     */
+    public void createAndShowGUI() {
+        pack();
+        setLocationRelativeTo(null); // Center the window
+        setVisible(true);
+    }
+
+    // --- Utility Methods ---
+
+    private void showMessage(String message) {
+        JOptionPane.showMessageDialog(this, message);
+    }
+
+    private void showMainMenu() {
+        mainPanel.removeAll();
+        mainPanel.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
+
+        JLabel title = new JLabel("=== College Voting System ===");
+        title.setFont(new Font("SansSerif", Font.BOLD, 18));
+        title.setAlignmentX(Component.CENTER_ALIGNMENT);
+        mainPanel.add(title);
+        mainPanel.add(Box.createVerticalStrut(15));
+
+        // Create buttons for main menu options
+        String[] options = {"Admin Login", "Student Login", "View Results", "Exit"};
+        for (int i = 0; i < options.length; i++) {
+            JButton button = new JButton((i + 1) + ". " + options[i]);
+            button.setAlignmentX(Component.CENTER_ALIGNMENT);
+            button.addActionListener(e -> handleMainMenuChoice(e));
+            mainPanel.add(button);
+            mainPanel.add(Box.createVerticalStrut(10));
+        }
+
+        pack();
+        revalidate();
+        repaint();
+    }
+
+    private void handleMainMenuChoice(ActionEvent event) {
+        String command = event.getActionCommand();
+        if (command.contains("1. Admin Login")) {
+            adminLogin();
+        } else if (command.contains("2. Student Login")) {
+            studentLogin();
+        } else if (command.contains("3. View Results")) {
+            viewResultsMain();
+        } else if (command.contains("4. Exit")) {
+            System.exit(0);
         }
     }
 
-    // ---------- Admin ----------
+    // --- Admin Functions ---
+
     private void adminLogin() {
-        System.out.print("Enter admin password: ");
-        String pass = sc.nextLine().trim();
-        if (!ADMIN_PASSWORD.equals(pass)) {
-            System.out.println("Incorrect admin password.");
-            return;
-        }
-        adminMenu();
-    }
+        String password = JOptionPane.showInputDialog(this, "Enter admin password:", "Admin Login", JOptionPane.PLAIN_MESSAGE);
+        if (password == null) return; // User cancelled
 
-    private void adminMenu() {
-        while (true) {
-            System.out.println("\n--- Admin Menu ---");
-            System.out.println("1. Add Candidate");
-            System.out.println("2. Register Student");
-            System.out.println("3. Set Voting Time");
-            System.out.println("4. Publish Results");
-            System.out.println("5. Back");
-            System.out.print("Choose: ");
-            String choice = sc.nextLine().trim();
-            switch (choice) {
-                case "1": addCandidate(); break;
-                case "2": registerStudent(); break;
-                case "3": setVotingTime(); break;
-                case "4": publishResults(); break;
-                case "5": return;
-                default: System.out.println("Invalid choice.");
-            }
+        if (ADMIN_PASSWORD.equals(password)) {
+            showAdminMenu();
+        } else {
+            showMessage("Incorrect admin password.");
         }
     }
 
-    private LocalDateTime getStartTimeFromDB() {
-        String s = DBHelper.getSetting("startTime");
-        if (s == null) return null;
-        try {
-            return LocalDateTime.parse(s);
-        } catch (Exception e) {
-            return null;
+    private void showAdminMenu() {
+        mainPanel.removeAll();
+        mainPanel.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
+
+        JLabel title = new JLabel("--- Admin Menu ---");
+        title.setFont(new Font("SansSerif", Font.BOLD, 16));
+        title.setAlignmentX(Component.CENTER_ALIGNMENT);
+        mainPanel.add(title);
+        mainPanel.add(Box.createVerticalStrut(15));
+
+        String[] options = {"Add Candidate", "Bulk Register Students", "Set Voting Time", "Publish Results", "Back"};
+        for (int i = 0; i < options.length; i++) {
+            JButton button = new JButton((i + 1) + ". " + options[i]);
+            button.setAlignmentX(Component.CENTER_ALIGNMENT);
+            button.addActionListener(e -> handleAdminMenuChoice(e));
+            mainPanel.add(button);
+            mainPanel.add(Box.createVerticalStrut(10));
         }
+
+        pack();
+        revalidate();
+        repaint();
     }
 
-    private LocalDateTime getEndTimeFromDB() {
-        String s = DBHelper.getSetting("endTime");
-        if (s == null) return null;
-        try {
-            return LocalDateTime.parse(s);
-        } catch (Exception e) {
-            return null;
+    private void handleAdminMenuChoice(ActionEvent event) {
+        String command = event.getActionCommand();
+        if (command.contains("1. Add Candidate")) {
+            addCandidate();
+        } else if (command.contains("2. Bulk Register Students")) {
+            bulkRegisterStudentsMenu();
+        } else if (command.contains("3. Set Voting Time")) {
+            setVotingTime();
+        } else if (command.contains("4. Publish Results")) {
+            publishResults();
+        } else if (command.contains("5. Back")) {
+            showMainMenu();
         }
     }
-
+    
+    // Check if admin is allowed to add candidates/register students (before start time)
     private boolean adminAddAllowed() {
         LocalDateTime start = getStartTimeFromDB();
-        if (start == null) return true;
-        // Disallow adding candidates or registering students once voting has started (start reached)
+        if (start == null) return true; // If time isn't set, allow changes
         LocalDateTime now = LocalDateTime.now();
         return now.isBefore(start);
     }
 
     private void addCandidate() {
         if (!adminAddAllowed()) {
-            System.out.println("Cannot add candidates after voting has started.");
+            showMessage("Cannot add candidates after voting has started.");
             return;
         }
-        System.out.print("Enter candidate name: ");
-        String name = sc.nextLine().trim();
-        if (name.isEmpty()) {
-            System.out.println("Aborted.");
+
+        String name = JOptionPane.showInputDialog(this, "Enter candidate name:", "Add Candidate", JOptionPane.PLAIN_MESSAGE);
+        if (name == null || name.trim().isEmpty()) {
+            showMessage("Candidate addition aborted.");
             return;
         }
+        name = name.trim();
+
         String sql = "INSERT INTO candidates(name) VALUES(?);";
         try (Connection conn = DBHelper.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, name);
             ps.executeUpdate();
-            System.out.println("Candidate added: " + name);
+            showMessage("Candidate added: " + name);
         } catch (SQLException e) {
-            System.out.println("Error adding candidate: " + e.getMessage());
+            if (e.getMessage().contains("UNIQUE constraint failed")) {
+                showMessage("Error: Candidate '" + name + "' already exists.");
+            } else {
+                showMessage("Error adding candidate: " + e.getMessage());
+            }
         }
     }
 
-    private void registerStudent() {
+    private void bulkRegisterStudentsMenu() {
         if (!adminAddAllowed()) {
-            System.out.println("Cannot register students after voting has started.");
+            showMessage("Cannot register students after voting has started.");
             return;
         }
-        System.out.print("Enter student register number: ");
-        String reg = sc.nextLine().trim();
-        if (reg.isEmpty()) {
-            System.out.println("Aborted.");
-            return;
+
+        String[] departments = {"CS (KSD24CS)", "EEE (KSD24EEE)", "EC (KSD24EC)", "MECH (KSD24ME)"};
+        String selectedDept = (String) JOptionPane.showInputDialog(
+                this,
+                "Select department to register 999 students (001-999):",
+                "Bulk Registration",
+                JOptionPane.PLAIN_MESSAGE,
+                null,
+                departments,
+                departments[0]
+        );
+
+        if (selectedDept == null) return; // User cancelled
+
+        String prefix = selectedDept.substring(selectedDept.indexOf('(') + 1, selectedDept.indexOf(')'));
+        String deptName = selectedDept.substring(0, selectedDept.indexOf('(')).trim();
+
+        int confirm = JOptionPane.showConfirmDialog(
+                this,
+                "Confirm registering 999 students for " + deptName + " (" + prefix + ")?",
+                "Confirm Bulk Registration",
+                JOptionPane.YES_NO_OPTION
+        );
+
+        if (confirm == JOptionPane.YES_OPTION) {
+            registerStudentsBulk(prefix, deptName);
         }
-        String sql = "INSERT INTO students(regNo) VALUES(?);";
+    }
+
+    private void registerStudentsBulk(String prefix, String deptName) {
+        String sql = "INSERT OR IGNORE INTO students(regNo) VALUES(?)";
+        int count = 0;
+
         try (Connection conn = DBHelper.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setString(1, reg);
-            ps.executeUpdate();
-            System.out.println("Student registered: " + reg);
+
+            conn.setAutoCommit(false); // Start transaction for speed
+            for (int i = 1; i <= 999; i++) {
+                String regNo = prefix + String.format("%03d", i);
+                ps.setString(1, regNo);
+                ps.addBatch();
+                count++;
+            }
+            
+            ps.executeBatch();
+            conn.commit();
+            conn.setAutoCommit(true);
+
+            showMessage("Successfully registered " + count + " potential students for " + deptName 
+                      + " (" + prefix + "001 to " + prefix + "999).");
+
         } catch (SQLException e) {
-            System.out.println("Error registering student: " + e.getMessage());
+            showMessage("Error during bulk registration: " + e.getMessage());
+            try {
+                DBHelper.getConnection().rollback();
+            } catch (SQLException ex) {
+                // Ignore rollback errors for simplicity
+            }
         }
     }
 
     private void setVotingTime() {
-        try {
-            System.out.print("Enter start time (yyyy-MM-dd HH:mm): ");
-            String sstart = sc.nextLine().trim();
-            LocalDateTime start = LocalDateTime.parse(sstart, INPUT_FORMAT);
+        // Input fields for start and end time
+        JTextField startField = new JTextField(20);
+        JTextField endField = new JTextField(20);
 
-            System.out.print("Enter end time (yyyy-MM-dd HH:mm): ");
-            String send = sc.nextLine().trim();
-            LocalDateTime end = LocalDateTime.parse(send, INPUT_FORMAT);
+        JPanel panel = new JPanel(new GridLayout(2, 2));
+        panel.add(new JLabel("Start Time (yyyy-MM-dd HH:mm):"));
+        panel.add(startField);
+        panel.add(new JLabel("End Time (yyyy-MM-dd HH:mm):"));
+        panel.add(endField);
 
-            if (!end.isAfter(start)) {
-                System.out.println("End time must be after start time.");
-                return;
+        int result = JOptionPane.showConfirmDialog(this, panel, "Set Voting Time", JOptionPane.OK_CANCEL_OPTION);
+
+        if (result == JOptionPane.OK_OPTION) {
+            String sstart = startField.getText().trim();
+            String send = endField.getText().trim();
+
+            try {
+                LocalDateTime start = LocalDateTime.parse(sstart, INPUT_FORMAT);
+                LocalDateTime end = LocalDateTime.parse(send, INPUT_FORMAT);
+
+                if (!end.isAfter(start)) {
+                    showMessage("End time must be after start time.");
+                    return;
+                }
+
+                DBHelper.setSetting("startTime", start.toString());
+                DBHelper.setSetting("endTime", end.toString());
+                DBHelper.setSetting("resultsPublished", "false"); // Reset results status
+                showMessage("Voting times saved: " + start.format(DISPLAY_FORMAT) + " to " + end.format(DISPLAY_FORMAT));
+            } catch (DateTimeParseException e) {
+                showMessage("Invalid date/time format. Use yyyy-MM-dd HH:mm");
             }
-
-            DBHelper.setSetting("startTime", start.toString());
-            DBHelper.setSetting("endTime", end.toString());
-            DBHelper.setSetting("resultsPublished", "false");
-            System.out.println("Voting times saved: " + start.format(DISPLAY_FORMAT) + " to " + end.format(DISPLAY_FORMAT));
-        } catch (Exception e) {
-            System.out.println("Invalid date/time format. Use yyyy-MM-dd HH:mm");
         }
     }
 
     private void publishResults() {
         LocalDateTime end = getEndTimeFromDB();
         if (end == null) {
-            System.out.println("End time not set. Set voting time first.");
+            showMessage("Error: Voting end time is not set.");
             return;
         }
+
         if (LocalDateTime.now().isBefore(end)) {
-            System.out.println("Voting still in progress. Cannot publish yet. Ends at: " + end.format(DISPLAY_FORMAT));
+            showMessage("Voting is still in progress. Cannot publish yet.\nEnds at: " + end.format(DISPLAY_FORMAT));
             return;
         }
 
         List<Candidate> results = fetchAllCandidatesSorted();
         if (results.isEmpty()) {
-            System.out.println("No candidates to publish.");
+            showMessage("No candidates were registered.");
             return;
         }
 
-        System.out.println("\n--- Final Results ---");
-        results.forEach(c -> System.out.println(c.getName() + " : " + c.getVoteCount()));
+        // Format results for display and file saving
+        StringBuilder sb = new StringBuilder();
+        sb.append("--- Final Voting Results ---\n");
+        results.forEach(c -> sb.append(c.getName()).append(" : ").append(c.getVoteCount()).append("\n"));
+        
+        showMessage(sb.toString());
 
         // Save to results.txt
         saveResultsToFile(results);
         DBHelper.setSetting("resultsPublished", "true");
-        System.out.println("Results saved to results.txt");
+        showMessage("Results saved successfully to results.txt and published.");
     }
 
     private void saveResultsToFile(List<Candidate> results) {
@@ -210,114 +326,101 @@ public class VotingSystem {
                 fw.write(c.getName() + " : " + c.getVoteCount() + "\n");
             }
         } catch (IOException e) {
-            System.out.println("Error saving results file: " + e.getMessage());
+            showMessage("Error saving results file: " + e.getMessage());
         }
     }
 
-    // ---------- Student ----------
+
+    // --- Student Functions ---
+
     private void studentLogin() {
-        System.out.print("Enter register number: ");
-        String reg = sc.nextLine().trim();
-        if (!isStudentRegistered(reg)) {
-            System.out.println("You are not registered to vote.");
+        String regNo = JOptionPane.showInputDialog(this, "Enter register number:", "Student Login", JOptionPane.PLAIN_MESSAGE);
+        if (regNo == null || regNo.trim().isEmpty()) return;
+        regNo = regNo.trim().toUpperCase();
+
+        if (!isStudentRegistered(regNo)) {
+            showMessage("Registration number not found. You are not registered to vote.");
             return;
         }
 
-        System.out.print("Enter password: ");
-        String pwd = sc.nextLine();
+        JPasswordField passwordField = new JPasswordField(10);
+        int option = JOptionPane.showConfirmDialog(this, passwordField, "Enter password (LBSCEK):", JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
+        if (option != JOptionPane.OK_OPTION) return;
+
+        String pwd = new String(passwordField.getPassword());
         String hashed = sha256(pwd);
+
         if (!STUDENT_PASSWORD_HASH.equalsIgnoreCase(hashed)) {
-            System.out.println("Authentication failed: incorrect password.");
+            showMessage("Authentication failed: incorrect password.");
             return;
         }
 
+        // Check voting time
         LocalDateTime start = getStartTimeFromDB();
         LocalDateTime end = getEndTimeFromDB();
+
         if (start == null || end == null) {
-            System.out.println("Voting time not set. Contact admin.");
+            showMessage("Voting time not set. Contact admin.");
             return;
         }
 
         LocalDateTime now = LocalDateTime.now();
-        // Students allowed only after start and before end (strict)
         if (!(now.isAfter(start) && now.isBefore(end))) {
-            System.out.println("Voting is not active now. Voting window: " +
+            showMessage("Voting is not active now.\nVoting window: " +
                 start.format(DISPLAY_FORMAT) + " to " + end.format(DISPLAY_FORMAT));
             return;
         }
 
-        if (hasStudentVoted(reg)) {
-            System.out.println("You have already voted.");
+        if (hasStudentVoted(regNo)) {
+            showMessage("You have already voted.");
             return;
         }
 
-        castVote(reg);
+        // If all checks pass, allow voting
+        castVote(regNo);
     }
 
-    private boolean isStudentRegistered(String reg) {
-        String sql = "SELECT 1 FROM students WHERE regNo = ?;";
-        try (Connection conn = DBHelper.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setString(1, reg);
-            try (ResultSet rs = ps.executeQuery()) {
-                return rs.next();
-            }
-        } catch (SQLException e) {
-            System.out.println("DB error: " + e.getMessage());
-            return false;
-        }
-    }
-
-    private boolean hasStudentVoted(String reg) {
-        String sql = "SELECT hasVoted FROM students WHERE regNo = ?;";
-        try (Connection conn = DBHelper.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setString(1, reg);
-            try (ResultSet rs = ps.executeQuery()) {
-                if (rs.next()) {
-                    return rs.getInt("hasVoted") == 1;
-                }
-            }
-        } catch (SQLException e) {
-            System.out.println("DB error: " + e.getMessage());
-        }
-        return false;
-    }
-
-    private void castVote(String reg) {
+    private void castVote(String regNo) {
         List<Candidate> list = fetchAllCandidates();
         if (list.isEmpty()) {
-            System.out.println("No candidates available.");
+            showMessage("No candidates available.");
             return;
         }
 
-        System.out.println("\n--- Candidates ---");
-        for (int i = 0; i < list.size(); i++) {
-            Candidate c = list.get(i);
-            System.out.println((i + 1) + ". " + c.getName());
-        }
-        System.out.print("Choose number to vote (or 0 to cancel): ");
-        String input = sc.nextLine().trim();
-        int choice;
-        try {
-            choice = Integer.parseInt(input);
-        } catch (NumberFormatException e) {
-            System.out.println("Invalid input.");
-            return;
-        }
-        if (choice == 0) {
-            System.out.println("Cancelled.");
-            return;
-        }
-        if (choice < 1 || choice > list.size()) {
-            System.out.println("Invalid choice.");
+        // Create options array for JOptionPane
+        String[] candidateOptions = list.stream()
+                                    .map(c -> c.getName())
+                                    .toArray(String[]::new);
+
+        String choiceName = (String) JOptionPane.showInputDialog(
+                this,
+                "Select a candidate to vote for:",
+                "Cast Your Vote",
+                JOptionPane.QUESTION_MESSAGE,
+                null,
+                candidateOptions,
+                candidateOptions[0]
+        );
+
+        if (choiceName == null) { // User cancelled
+            showMessage("Vote cancelled.");
             return;
         }
 
-        Candidate sel = list.get(choice - 1);
-        // atomic update
+        // Find the selected candidate object
+        Candidate sel = list.stream()
+                            .filter(c -> c.getName().equals(choiceName))
+                            .findFirst().orElse(null);
+
+        if (sel == null) {
+            showMessage("Invalid selection.");
+            return;
+        }
+        
+        // Execute atomic update
         String updateVote = "UPDATE candidates SET votes = votes + 1 WHERE id = ?;";
         String setVoted = "UPDATE students SET hasVoted = 1 WHERE regNo = ?;";
+        
         try (Connection conn = DBHelper.getConnection()) {
             conn.setAutoCommit(false);
             try (PreparedStatement ps1 = conn.prepareStatement(updateVote);
@@ -326,43 +429,101 @@ public class VotingSystem {
                 ps1.setInt(1, sel.getId());
                 ps1.executeUpdate();
 
-                ps2.setString(1, reg);
+                ps2.setString(1, regNo);
                 ps2.executeUpdate();
 
                 conn.commit();
-                System.out.println("Vote recorded. Thank you!");
+                showMessage("Vote recorded successfully for " + sel.getName() + ". Thank you!");
             } catch (SQLException ex) {
                 conn.rollback();
-                System.out.println("Failed to record vote: " + ex.getMessage());
+                showMessage("Failed to record vote due to database error: " + ex.getMessage());
             } finally {
                 conn.setAutoCommit(true);
             }
         } catch (SQLException e) {
-            System.out.println("DB error: " + e.getMessage());
+            showMessage("Database connection error: " + e.getMessage());
         }
     }
 
-    // ---------- View Results (Main menu) ----------
+
+    // --- Results Functions ---
+
     private void viewResultsMain() {
         LocalDateTime end = getEndTimeFromDB();
         if (end == null) {
-            System.out.println("Voting end time not set yet.");
+            showMessage("Voting end time is not set yet.");
             return;
         }
         if (LocalDateTime.now().isBefore(end)) {
-            System.out.println("Voting is still in progress.");
+            showMessage("Voting is still in progress. Results are not yet final.");
             return;
         }
+        
         List<Candidate> results = fetchAllCandidatesSorted();
         if (results.isEmpty()) {
-            System.out.println("No candidates were registered.");
+            showMessage("No candidates were registered.");
             return;
         }
-        System.out.println("\n--- Voting Results ---");
-        results.forEach(c -> System.out.println(c.getName() + " : " + c.getVoteCount()));
+        
+        StringBuilder sb = new StringBuilder("--- Voting Results ---\n\n");
+        results.forEach(c -> sb.append(c.getName()).append(" : ").append(c.getVoteCount()).append("\n"));
+        
+        JOptionPane.showMessageDialog(this, new JScrollPane(new JTextArea(sb.toString(), 10, 30)), 
+                                      "Election Results", JOptionPane.PLAIN_MESSAGE);
     }
 
-    // ---------- DB helpers for candidates ----------
+    // --- DB Helper Implementations ---
+
+    private boolean isStudentRegistered(String regNo) {
+        String sql = "SELECT 1 FROM students WHERE regNo = ?;";
+        try (Connection conn = DBHelper.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, regNo);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next();
+            }
+        } catch (SQLException e) {
+            System.err.println("DB error (isStudentRegistered): " + e.getMessage());
+            return false;
+        }
+    }
+
+    private boolean hasStudentVoted(String regNo) {
+        String sql = "SELECT hasVoted FROM students WHERE regNo = ?;";
+        try (Connection conn = DBHelper.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, regNo);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    return rs.getInt("hasVoted") == 1;
+                }
+            }
+        } catch (SQLException e) {
+            System.err.println("DB error (hasStudentVoted): " + e.getMessage());
+        }
+        return false;
+    }
+
+    private LocalDateTime getStartTimeFromDB() {
+        String s = DBHelper.getSetting("startTime");
+        if (s == null) return null;
+        try {
+            return LocalDateTime.parse(s);
+        } catch (DateTimeParseException e) {
+            return null;
+        }
+    }
+
+    private LocalDateTime getEndTimeFromDB() {
+        String s = DBHelper.getSetting("endTime");
+        if (s == null) return null;
+        try {
+            return LocalDateTime.parse(s);
+        } catch (DateTimeParseException e) {
+            return null;
+        }
+    }
+    
     private List<Candidate> fetchAllCandidates() {
         List<Candidate> out = new ArrayList<>();
         String sql = "SELECT id, name, votes FROM candidates ORDER BY id ASC;";
@@ -373,13 +534,14 @@ public class VotingSystem {
                 out.add(new Candidate(rs.getInt("id"), rs.getString("name"), rs.getInt("votes")));
             }
         } catch (SQLException e) {
-            System.out.println("DB error: " + e.getMessage());
+            System.err.println("DB error (fetchAllCandidates): " + e.getMessage());
         }
         return out;
     }
 
     private List<Candidate> fetchAllCandidatesSorted() {
         List<Candidate> out = new ArrayList<>();
+        // Sort by votes DESC, then name ASC for tie-breaking
         String sql = "SELECT id, name, votes FROM candidates ORDER BY votes DESC, name ASC;";
         try (Connection conn = DBHelper.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql);
@@ -388,12 +550,17 @@ public class VotingSystem {
                 out.add(new Candidate(rs.getInt("id"), rs.getString("name"), rs.getInt("votes")));
             }
         } catch (SQLException e) {
-            System.out.println("DB error: " + e.getMessage());
+            System.err.println("DB error (fetchAllCandidatesSorted): " + e.getMessage());
         }
         return out;
     }
 
-    // ---------- Password hashing ----------
+
+    // --- Security Helper ---
+
+    /**
+     * Generates the SHA-256 hash of the input string.
+     */
     private static String sha256(String input) {
         try {
             MessageDigest md = MessageDigest.getInstance("SHA-256");
@@ -402,12 +569,20 @@ public class VotingSystem {
             for (byte x : b) sb.append(String.format("%02x", x & 0xff));
             return sb.toString();
         } catch (Exception e) {
-            throw new RuntimeException(e);
+            // In a real app, handle this gracefully. Here, we throw a runtime exception.
+            throw new RuntimeException("SHA-256 hashing failed", e);
         }
     }
 
-    // public alias used (keeps same naming as previous)
-    public static String hashPassword(String p) {
-        return sha256(p);
+    /**
+     * Helper to correctly size the main window components after a view change.
+     */
+    @Override
+    public void pack() {
+        super.pack();
+        // Ensure minimum size for better appearance
+        int width = Math.max(300, getWidth());
+        int height = Math.max(250, getHeight());
+        setSize(width, height);
     }
 }
