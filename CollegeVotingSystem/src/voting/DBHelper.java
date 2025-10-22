@@ -1,59 +1,72 @@
 package voting;
 
-import java.sql.*;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Statement;
 
 /**
- * DBHelper - lightweight SQLite helper.
- * Creates DB file voting.db in working directory and creates tables if they don't exist.
+ * Handles all direct interactions with the SQLite database.
  */
 public class DBHelper {
-    private static final String DB_URL = "jdbc:sqlite:voting.db";
 
+    // SQLite connection string
+    private static final String URL = "jdbc:sqlite:voting.db";
+
+    // Static initializer to ensure tables are created when the class is loaded
     static {
-        // Ensure tables exist on first access
         try {
-            Class.forName("org.sqlite.JDBC"); // safe no-op if driver auto-loads
-        } catch (ClassNotFoundException ignored) {}
-
-        try (Connection conn = getConnection();
-             Statement stmt = conn.createStatement()) {
-
-            stmt.execute("PRAGMA foreign_keys = ON;");
-
-            stmt.execute(
-                "CREATE TABLE IF NOT EXISTS candidates (" +
-                "id INTEGER PRIMARY KEY AUTOINCREMENT," +
-                "name TEXT UNIQUE NOT NULL," +
-                "votes INTEGER DEFAULT 0" +
-                ");"
-            );
-
-            stmt.execute(
-                "CREATE TABLE IF NOT EXISTS students (" +
-                "regNo TEXT PRIMARY KEY NOT NULL," +
-                "hasVoted INTEGER DEFAULT 0" +
-                ");"
-            );
-
-            stmt.execute(
-                "CREATE TABLE IF NOT EXISTS settings (" +
-                "key TEXT PRIMARY KEY NOT NULL," +
-                "value TEXT" +
-                ");"
-            );
-
-        } catch (SQLException e) {
-            System.err.println("DB initialization error: " + e.getMessage());
-            e.printStackTrace();
+            Class.forName("org.sqlite.JDBC"); // Load SQLite driver
+        } catch (ClassNotFoundException e) {
+            System.err.println("SQLite JDBC driver not found: " + e.getMessage());
         }
-    }
-
-    public static Connection getConnection() throws SQLException {
-        return DriverManager.getConnection(DB_URL);
+        createTables();
     }
 
     /**
-     * Utility to read a setting by key (returns null if not set).
+     * Establishes and returns a database connection.
+     */
+    public static Connection getConnection() throws SQLException {
+        return DriverManager.getConnection(URL);
+    }
+
+    /**
+     * Creates the necessary tables if they don't exist.
+     */
+    private static void createTables() {
+        // Table for students
+        String studentSql = "CREATE TABLE IF NOT EXISTS students ("
+                + "regNo TEXT PRIMARY KEY,"
+                + "hasVoted INTEGER DEFAULT 0"
+                + ");";
+
+        // Table for candidates
+        String candidateSql = "CREATE TABLE IF NOT EXISTS candidates ("
+                + "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                + "name TEXT NOT NULL UNIQUE,"
+                + "votes INTEGER DEFAULT 0"
+                + ");";
+
+        // Table for application settings (e.g., voting time)
+        String settingsSql = "CREATE TABLE IF NOT EXISTS settings ("
+                + "key TEXT PRIMARY KEY,"
+                + "value TEXT"
+                + ");";
+
+        try (Connection conn = getConnection();
+             Statement stmt = conn.createStatement()) {
+            stmt.execute(studentSql);
+            stmt.execute(candidateSql);
+            stmt.execute(settingsSql);
+        } catch (SQLException e) {
+            System.err.println("Error creating tables: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Retrieves an application setting by key.
      */
     public static String getSetting(String key) {
         String sql = "SELECT value FROM settings WHERE key = ?;";
@@ -61,26 +74,29 @@ public class DBHelper {
              PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, key);
             try (ResultSet rs = ps.executeQuery()) {
-                if (rs.next()) return rs.getString("value");
+                if (rs.next()) {
+                    return rs.getString("value");
+                }
             }
         } catch (SQLException e) {
-            System.err.println("getSetting error: " + e.getMessage());
+            System.err.println("Error reading setting: " + e.getMessage());
         }
         return null;
     }
 
     /**
-     * Insert or replace a setting.
+     * Saves or updates an application setting.
      */
     public static void setSetting(String key, String value) {
-        String sql = "INSERT OR REPLACE INTO settings(key, value) VALUES(?, ?);";
+        // Use REPLACE INTO to insert or update the value
+        String sql = "REPLACE INTO settings(key, value) VALUES(?, ?);";
         try (Connection conn = getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, key);
             ps.setString(2, value);
             ps.executeUpdate();
         } catch (SQLException e) {
-            System.err.println("setSetting error: " + e.getMessage());
+            System.err.println("Error saving setting: " + e.getMessage());
         }
     }
 }
